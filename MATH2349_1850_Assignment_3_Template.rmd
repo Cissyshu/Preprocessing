@@ -1,0 +1,230 @@
+---
+title: "MATH2349 Semester 2, 2018"
+author: "Shan Jiang s3592369, Anna Krinochkina s3712761, Xiyue Shu s3705474"
+subtitle: Assignment 3
+output:
+  html_notebook: default
+---
+
+## Required packages 
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(Hmisc)
+library(forecast)
+library(stringr)
+library(lubridate)
+library(editrules)
+```
+
+## Executive Summary 
+
+Two open data sets `accidents` and `weather` were joined to create the data frame used for required data preprocessing. Some tidying of the data sets occured before merging. They were filtered to keep only observations for January 2016 to reduce the number of rows as well as the running time. The `key` variable was created to enable merging the data frames with `left join()`. Types of variables, data structures and attributes were checked. Data types conversions were performed where necessary. The `combined` data frame conforms the tidy data principles, so not much was done to tidy it up. Two new variables were mutated from the existing for better understanding of data. Scanning the data for missing values, inconsistencies and obvious errors was performed. Missing values in some numeric variables were removed due to their nature and some were replaced with a mean value. No data inconsistency was found. The numeric variables were scanned for univariate outliers. In some cases the outliers were kept and in some - capped using the Tukey’s method. Data transformation techniques were applied where seemed appropriate. 
+
+## Data 
+
+The `accidents` data set contains 477732 observations of 29 variables and includes the information about all vehicle collisions in New York City during 2015 and 2016. It was taken from kaggle.com located at https://www.kaggle.com/nypd/vehicle-collisions/home.
+
+The variables are: `UNIQUE KEY` [integer], `DATE` [character], `TIME` ['hms' numeric], `BOROUGH` [character], `ZIP CODE` [integer], `LATITUDE` [numeric], `LONGITUDE` [numeric], `LOCATION` [character], `ON STREET NAME` [character], `CROSS STREET NAME` [character], `OFF STREET NAME` [character], `PERSONS INJURED` [integer], `PERSONS KILLED` [integer], `PEDESTRIANS INJURED` [integer], `PEDESTRIANS KILLED` [integer], `CYCLISTS INJURED` [integer], `CYCLISTS KILLED` [integer], `MOTORISTS INJURED` [integer], `MOTORISTS KILLED` [integer], `VEHICLE 1 TYPE` [character], `VEHICLE 2 TYPE` [character], `VEHICLE 3 TYPE`  [character], `VEHICLE 4 TYPE` [character],` VEHICLE 5 TYPE` [character], `VEHICLE 1 FACTOR` [character], `VEHICLE 2 FACTOR` [character], `VEHICLE 3 FACTOR` [character], `VEHICLE 4 FACTOR` [character], `VEHICLE 5 FACTOR` [character]. Variables like `VEHICLE FACTOR` refer to the reason this vehicle was involved in an accident. The other variables are self explanatory. 
+
+The `weather` data set contains 5175 observations of 12 variables and includes the information about hourly weather conditions in New York City from January to June 2016. It was taken from kaggle.com located at https://www.kaggle.com/pschale/nyc-taxi-wunderground-weather/home.
+
+The variables are: `timestamp` [POSIXct], `temp` [numeric], `windspeed` [numeric], `humidity` [numeric], `precip` [numeric], `pressure` [numeric], `conditions` [character], `dailyprecip` [character], `dailysnow` [character], `fog` [integer], `rain` [integer], `snow` [integer]. `precip` and `dailyprecip` variables refer to precipitation during last hour in inches and the total precipitation during the day respectively. Variables `fog`, `rain` and `snow`: if 1 - current conditions include fog, rain or snow, else 0. The other variables are self explanatory.
+
+```{r}
+setwd("~/Downloads/Postgrads/data_pr/assignment_3")
+accidents <- read_csv("accidents.csv")
+head(accidents)
+weather <- read_csv("weatherdata.csv")
+head(weather)
+accidents$DATE <- mdy(accidents$DATE)
+accidents <- accidents %>% mutate(., year = year(accidents$DATE), 
+                                     month = month(accidents$DATE), 
+                                     day = day(accidents$DATE), 
+                                     hour = hour(accidents$TIME))
+accidents <- accidents %>% filter(., year == 2016 & month == 1)
+accidents <- accidents %>% unite(key, month, day, hour, sep = "-")
+accidents <- accidents[c(1:3, 5, 12:19, 31)]
+head(accidents)
+weather <- weather %>% mutate(month = month(timestamp), 
+                              day = day(timestamp), 
+                              hour = hour(timestamp))
+weather <-  weather %>% filter(., month == 1)
+weather <- weather %>% unite(key, month, day, hour, sep = "-")
+tidy_weather <- weather %>% filter(., minute(timestamp) == 51)
+head(tidy_weather)
+combined <- left_join(accidents, tidy_weather, by = "key")
+head(combined)
+```
+
+`accidents` and `weather` data sets were joined to create a `combined` data frame which was used for further processing. Left join was used to match the observations from the `weather` data frame to the `accidents` data frame and keep all observations in the latter. Key variable `key` was mutated to merge the data sets, it was created by uniting month number, day of the month and hour.
+
+Some tidying of the initial data sets was performed before they were merged. The steps were as follows:
+
+* `DATE` variable was converted from character to a date type with the use of `mdy()` function.
+
+* Four additional variables were created (`year`, `month`, `day`, `hour`) by extracting elements from the `DATE` and `TIME` variables.
+
+* The `accidents` data frame was filtered to keep only observations for January 2016, the same was done to the `weather` data frame. The `accidents` data was also subset to keep only required variables.
+
+* After analysing the `weather` data frame, it was found that it contained several observations for the same hour in the day which created duplicates when joined to `accidents` data. So, only observations for 51st minute of every hour in a day were kept in a `tidy_weather` data frame (e.g. 2016-01-01 00:51:00, 2016-01-01 01:51:00, etc.), as this was an hourly pattern in the data.
+
+After all tidying and filtering, the `combined` data frame contains 18101 observations of 25 variables.
+
+## Understand 
+
+```{r}
+combined <- combined %>% mutate(., `UNIQUE KEY` = as.character(`UNIQUE KEY`),
+                                   `ZIP CODE` = as.character(`ZIP CODE`))
+combined$dailyprecip[which(combined$dailyprecip == "T")] <- "0.00"
+combined$dailysnow[which(combined$dailysnow == "T")] <- "0.00"
+combined <- combined %>% mutate(precip = as.numeric(precip),
+                                dailyprecip = as.numeric(dailyprecip),
+                                dailysnow = as.numeric(dailysnow))
+combined <- combined %>% mutate(fog = factor(fog, levels = c("0","1"), labels = c("No","Yes")), 
+                                rain = factor(rain, levels = c("0","1"), labels = c("No","Yes")),
+                                snow = factor(snow, levels = c("0","1"), labels = c("No","Yes")))
+head(combined$fog)
+head(combined$rain)
+head(combined$snow)
+str(combined)
+attributes(combined)
+```
+
+The steps taken in this section:
+
+* Integer variables `UNIQUE KEY` and `ZIP CODE` were converted to a character type.
+
+* Variables `dailyprecip` and `dailysnow` were read as characters because of, what seems to be, a data entry error, they had an unexplainable "T" character in several observations. They was replaced with a 0.00 value. These variables, as well as the variable `precip`, were converted to a numeric type.
+
+* Integer variables `fog`, `rain` and `snow` were converted to factors and labeled.
+
+* Structure and attributes of `combined` data frame were checked.
+
+##	Tidy & Manipulate Data I 
+
+In this section `DATE` and `TIME` variables from `combined` data frame were united to create a `DATETIME` varible. `DATETIME` was converted to a date(POSIXct) type. Overall, as some tidying up has been done before joining data sets, merged data conforms the tidy data principles (each variable forms a column, each observation forms a row and each type of observational unit forms a table). 
+
+```{r}
+combined <- combined %>% unite(DATETIME,DATE,TIME, sep = " ")
+combined$DATETIME <- ymd_hms(combined$DATETIME)
+head(combined)
+```
+
+##	Tidy & Manipulate Data II 
+
+Two new variables `PEOPLE_INJURED` and `PEOPLE_KILLED` were created from the existing variables for better understanding of the data. Subset was done to drop the unnecessary columns.
+
+```{r}
+combined <- combined %>% mutate(`PEOPLE_INJURED` = `PERSONS INJURED`+`PEDESTRIANS INJURED`+`CYCLISTS INJURED`+`MOTORISTS INJURED`,
+                                `PEOPLE_KILLED` = `PERSONS KILLED`+`PEDESTRIANS KILLED`+`CYCLISTS KILLED`+`MOTORISTS KILLED`)
+combined_1 <- combined[,-(4:13)]
+head(combined_1)
+```
+
+##	Scan I 
+
+The steps taken in this section are as follows:
+
+* The `combined_1` data frame was scanned for missing values using functions `colSums(is.na())`. Only missing values in numeric variables were considered.
+
+* Based on the output of the previous step, it was found variables `temp`, `humidity`, `precip`, `conditions`, `dailypercip`, `dailysnow`, `fog`, `rain` and `snow` have the same number of missing values. After checking the locations of these missing values, it was found they occured in the same observations. These missing values, therefore, were introduced in the process of `left_join()`.
+
+* The missing values mentioned above were removed by subsetting.
+
+* There were also missing values in varaibles `windspeed` and `pressure`, they were replaced with the mean value.
+
+* Lastly, inconsisitencies were checked using `violatedEdits()` under the rule we set, and no violations were found in the data set. 
+
+```{r}
+colSums(is.na(combined_1))
+which(is.na(combined_1$humidity))
+which(is.na(combined_1$dailyprecip))
+which(is.na(combined_1$temp))
+combined_2 <- combined_1[-(which(is.na(combined_1$temp))),]
+colSums(is.na(combined_2))
+combined_2$windspeed[is.na(combined_2$windspeed)] <- mean(combined_2$windspeed, na.rm = T)
+combined_2$pressure[is.na(combined_2$pressure)] <- mean(combined_2$pressure, na.rm = T)
+colSums(is.na(combined_2))
+(rule1 <- editset(c("windspeed >= 0", "humidity >= 0", "humidity <= 100", "precip >= 0", "pressure >=0", "dailyprecip >= 0", "dailysnow >= 0", "PEOPLE_INJURED >= 0", "PEOPLE_KILLED >=0")))
+violated <- violatedEdits(rule1, combined_2)
+summary(violated)
+```
+
+##	Scan II
+
+The steps taken in this section are as follows:
+
+* Boxplot of numeric variables were created side by side for scanning univariate ourliers.
+
+* Outliers in variables `windspeed`, `humidity` and `pressure` were capped using the Tukey’s method.
+
+* Outliers in variables `precip`, `dailyprecip`, `dailysnow`, `PEOPLE INJURED` and `PEOPLE KILLED` were kept, they occur only because most of the observations in these variables are zeros. 
+
+* Boxplots of the capped variables were made to check if capping successfully removed the outliers.
+
+```{r}
+par(mfrow=c(2,5)) 
+combined_2$temp %>% boxplot(main = "Temperature")
+combined_2$windspeed %>% boxplot(main = "Windspeed")
+combined_2$humidity %>% boxplot(main = "Humidity")
+combined_2$precip %>% boxplot(main = "Precipitation")
+combined_2$pressure %>% boxplot(main = "Pressure")
+combined_2$dailyprecip %>% boxplot(main = "Daily Precipitation")
+combined_2$dailysnow %>% boxplot(main = "Daily Snow")
+combined_2$PEOPLE_INJURED %>% boxplot(main = "People Injured")
+combined_2$PEOPLE_KILLED %>% boxplot(main = "People Killed")
+cap <- function(x){
+    quantiles <- quantile( x, c(.05, 0.25, 0.75, .95 ) )
+    x[ x < quantiles[2] - 1.5*IQR(x) ] <- quantiles[1]
+    x[ x > quantiles[3] + 1.5*IQR(x) ] <- quantiles[4]
+    x
+}
+combined_2$windspeed <- combined_2$windspeed %>% cap()
+combined_2$humidity <- combined_2$humidity %>% cap()
+combined_2$pressure <- combined_2$pressure %>% cap()
+par(mfrow=c(1,3)) 
+combined_2$windspeed %>% boxplot(main = "Windspeed")
+combined_2$humidity %>% boxplot(main = "Humidity")
+combined_2$pressure %>% boxplot(main = "Pressure")
+```
+
+##	Transform 
+
+In this section square root transformation was applied for the `windspeed` variable to reduce slight right skewness in its distribution. Histograms were made to visualise the effect of data transformation.
+
+Z-score transformation was applied for variables `humidity` and `temp`, as their values have significantly greater range than the other variables. The resulting transformed data values have a zero mean and standard deviation equals to one.
+
+```{r}
+transformed <- combined_2
+hist(combined_2$windspeed,
+     breaks = 5,
+     main = "Histogram of Windspeed",
+     xlab = "Windspeed")
+transformed$windspeed <- sqrt(combined_2$windspeed)
+hist(transformed$windspeed, breaks = 5,
+                            main = "Histogram of Transformed Windspeed",
+                            xlab = "Square Root of Windspeed")
+hist(combined_2$humidity,
+     main = "Histogram of Humidity",
+     xlab = "Humidity")
+transformed$humidity <- scale(combined_2$humidity, center = T, scale = T)
+hist(transformed$humidity,
+     main = "Histogram of Standardised Humidity", 
+     xlab = "z-score Humidity")
+hist(combined_2$temp,
+     main = "Histogram of Temperature",
+     xlab = "Temperature")
+transformed$temp <- scale(combined_2$temp, center = T, scale = T)
+hist(transformed$temp,
+     main = "Histogram of Standardised Temperature", 
+     xlab = "z-score Temperature")
+head(combined_2)
+head(transformed)
+```
+
+<br>
+<br>
